@@ -1,0 +1,63 @@
+{{- if .Capabilities.APIVersions.Has "batch/v1/CronJob" }}
+apiVersion: batch/v1
+{{- else -}}
+apiVersion: batch/v1beta1
+{{- end }}
+kind: Job
+metadata:
+  name: app-sync-job-{{ randAlphaNum 5 | lower }}
+spec:
+      template:
+        spec:
+          serviceAccountName: devtron
+          initContainers:
+          - name: migration-wait
+            image: "quay.io/devtron/kubectl:latest"
+            command: ['sh', '-c', 'while [ ! $(kubectl -n devtroncd get $(kubectl -n devtroncd get job -l job=postgresql-migrate-devtron -o name) -o jsonpath="{.status.succeeded}")  ]; do sleep 10; done']
+          containers:
+          - name: chart-sync
+            image: quay.io/devtron/chart-sync:57e17953-373-10147
+            env:
+            - name: PG_ADDR
+              value: postgresql-postgresql.devtroncd
+            - name: PG_DATABASE
+              value: orchestrator
+            - name: PG_USER
+              value: postgres
+            envFrom:
+            - secretRef:
+                name: devtron-secret
+          restartPolicy: OnFailure
+      backoffLimit: 4
+---
+{{- if .Capabilities.APIVersions.Has "batch/v1/Job" }}
+apiVersion: batch/v1
+{{- else -}}
+apiVersion: batch/v1beta1
+{{- end }}
+kind: CronJob
+metadata:
+  name: app-sync-cronjob
+  annotations:
+    "helm.sh/resource-policy": keep
+spec:
+  schedule: "0 19 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: chart-sync
+            image: quay.io/devtron/chart-sync:57e17953-373-10147
+            env:
+            - name: PG_ADDR
+              value: postgresql-postgresql.devtroncd
+            - name: PG_DATABASE
+              value: orchestrator
+            - name: PG_USER
+              value: postgres
+            envFrom:
+            - secretRef:
+                name: devtron-secret
+          restartPolicy: Never
+      backoffLimit: 4
